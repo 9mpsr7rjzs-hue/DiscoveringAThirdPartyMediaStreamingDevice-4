@@ -82,8 +82,8 @@
 		7A0915B22788ED1E00957DF4 /* Embed App Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
 			files = (
 				7A0916392788F38100957DF4 /* Extension.appex in Embed App Extensions */,
 			);

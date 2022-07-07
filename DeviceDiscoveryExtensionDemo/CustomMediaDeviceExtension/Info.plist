@@ -15,11 +15,6 @@
 	<array>
 		<string>_deviceaccess._udp.</string>
 	</array>
-	<key>NSExtension</key>
-	<dict>
-		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.discovery-extension</string>
-	</dict>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
