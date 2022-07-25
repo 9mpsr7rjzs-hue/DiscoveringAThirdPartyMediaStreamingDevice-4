@@ -1,6 +1,6 @@
 # Discovering a third-party media-streaming device
 
-Build an extension that streams media to a server app on iOS or macOS.
+Build an extension that streams media to a server app in iOS or macOS.
 
 ## Overview
 
