@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 Utilities to discover devices.
@@ -155,21 +155,26 @@ class DeviceDiscovery: NSObject, CBCentralManagerDelegate {
 	}
 
 	private func setupBTTimeoutTimer() {
-		ddDeviceQueue.sync { [self] in
-			guard btTimeoutTickTimer == nil else {
+		ddDeviceQueue.sync { [weak self] in
+			guard let strongSelf = self else { return }
+			guard strongSelf.btTimeoutTickTimer == nil else {
 				logger.log("BT monitor already started")
 				return
 			}
-			btTimeoutTickTimer = Timer(timeInterval: btTimeoutTickPeriod, repeats: true) { [self] _ in
-				ddDeviceQueue.async {
-					self.serviceBTDeviceTimer()
+			strongSelf.btTimeoutTickTimer = Timer(timeInterval: btTimeoutTickPeriod, repeats: true) { [weak self] _ in
+				guard let strongSelf = self else { return }
+				strongSelf.ddDeviceQueue.async {
+					self?.serviceBTDeviceTimer()
 				}
 			}
 		}
-		DispatchQueue.main.async { [self] in
-			if let timer = btTimeoutTickTimer {
+
+		DispatchQueue.main.async { [weak self] in
+			guard let strongSelf = self else { return }
+
+			if let timer = strongSelf.btTimeoutTickTimer {
 				RunLoop.main.add(timer, forMode: .common)
-				logger.log("BT monitor started")
+				strongSelf.logger.log("BT monitor started")
 			}
 		}
 	}
@@ -198,52 +203,17 @@ class DeviceDiscovery: NSObject, CBCentralManagerDelegate {
 	}
 
 	// MARK: Bonjour
-    
 	func bonjourStartScanning() {
 		if !bonjourScanning {
 			bonjourScanning = true
-			browser.stateUpdateHandler = { [self] newState in
-				logger.log("browser.stateUpdateHandler \(String(describing: newState))")
-				switch newState {
-				case .failed(let error):
-					logger.log("Bonjour browsing failed error='\(error.localizedDescription)', cancelling...")
-					bonjourStopScanning()
-				default:
-					break
-				}
-				if newState != .ready {
-					self.foundDDDevices = self.clearBonjourDevices(from: self.foundDDDevices)
-				}
+			browser.stateUpdateHandler = { [weak self] newState in
+				self?.bonjourStateUpdateHandler(newState)
 			}
 
-			browser.browseResultsChangedHandler = { [self] results, _ in
-				guard eventHandler != nil else {
-					logger.error("Ignoring Bonjour results: no event handler to report set")
-					return
-				}
-				var currentBonjourDevices: [String: DeviceState] = [:]
-				for result in results {
-					switch result.endpoint {
-					case .opaque:
-						logger.log("Bonjour .opaque endpoint result: \(String(describing: result))")
-                        // Search for a matching, previously found Bonjour or Bluetooth device. Or, create
-                        // a new Bonjour-only device.
-						if let ddDeviceState = bonjourDidDiscover(result) {
-							currentBonjourDevices[ddDeviceState.device.identifier] = ddDeviceState
-						}
-					default:
-						logger.log("Bonjour result with unexpected endpoint type: \(String(describing: result))")
-					}
-				}
-				let lostDevices = foundDDDevices.filter({ currentBonjourDevices[$0.key] == nil })
-                // Report Bonjour devices as lost and the remaining Bluetooth devices as changed.
-				if !lostDevices.isEmpty {
-					foundDDDevices = clearBonjourDevices(from: lostDevices)
-				}
-
-				// Complete the full set of found devices by adding in the Bonjour search results.
-				foundDDDevices.merge(currentBonjourDevices) { (_, new) in new }
+			browser.browseResultsChangedHandler = { [weak self] results, changes in
+				self?.bonjourResultsChanged(results: results, changes: changes)
 			}
+
 			browser.start(queue: ddDeviceQueue)
 		} else {
 			logger.log("Bonjour already scanning")
@@ -257,12 +227,88 @@ class DeviceDiscovery: NSObject, CBCentralManagerDelegate {
 		}
 	}
 
+	func bonjourStateUpdateHandler(_ newState: NWBrowser.State) {
+		logger.log("browser.stateUpdateHandler \(String(describing: newState))")
+		switch newState {
+		case .failed(let error):
+			logger.log("Bonjour browsing failed error='\(error.localizedDescription)', cancelling...")
+			bonjourStopScanning()
+		default:
+			break
+		}
+		if newState != .ready {
+			self.foundDDDevices = self.clearBonjourDevices(from: self.foundDDDevices)
+		}
+	}
+	func bonjourResultsChanged(results: Set<NWBrowser.Result>, changes: Set<NWBrowser.Result.Change>) {
+		guard eventHandler != nil else {
+			logger.error("Ignoring Bonjour results: no event handler to report set")
+			return
+		}
+		var currentBonjourDevices: [String: DeviceState] = [:]
+		var lostBonjourDevices: [String: DeviceState] = [:]
+		var changedNewDevices: [NWBrowser.Result] = []
+		for change in changes {
+			switch change {
+			case .added(let deviceAdded):
+				// Find a matching already found DDDevice (BJ or BJ+BT) or create a new one (BJ only)
+				// a new Bonjour-only device.
+				if let ddDeviceState = bonjourDidDiscover(deviceAdded) {
+					currentBonjourDevices[ddDeviceState.device.identifier] = ddDeviceState
+				}
+			case .removed(let deviceRemoved):
+				if let knownDevice = foundDDDevices.first(where: { $0.value.device.networkEndpoint == deviceRemoved.endpoint }) {
+					logger.log("Known device removed: \(String(describing: knownDevice))")
+					lostBonjourDevices[knownDevice.key] = knownDevice.value
+				}
+			case .changed(let oldDevice, let newDevice, let deviceFlags):
+				if let knownDevice = foundDDDevices.first(where: { $0.value.device.networkEndpoint == oldDevice.endpoint }) {
+					logger.log(
+                        """
+                        Known device changed: \(String(describing: knownDevice)) to
+                        \(String(describing: knownDevice)) flags: \(String(describing: deviceFlags))
+                        """
+                    )
+					lostBonjourDevices[knownDevice.key] = knownDevice.value
+					changedNewDevices.append(newDevice)
+				} else if let ddDeviceState = bonjourDidDiscover(newDevice) {
+					// This could happen when an ignored device refreshes its metadata.
+					currentBonjourDevices[ddDeviceState.device.identifier] = ddDeviceState
+				} else {
+					logger.log(
+                        """
+                        Ignoring untracked device change: \(String(describing: oldDevice)) to
+                        \(String(describing: newDevice)) flags: \(String(describing: deviceFlags))
+                        """
+                    )
+				}
+			default:
+				logger.log("Bonjour device not changed: \(String(describing: change))")
+			}
+		}
+		// Report Bonjour devices as lost and the remaining Bluetooth devices as changed.
+		if !lostBonjourDevices.isEmpty {
+			foundDDDevices = clearBonjourDevices(from: lostBonjourDevices)
+		}
+
+		for newDevice in changedNewDevices {
+			if let ddDeviceState = bonjourDidDiscover(newDevice) {
+				logger.log("Device changed was re-added: \(String(describing: ddDeviceState))")
+				currentBonjourDevices[ddDeviceState.device.identifier] = ddDeviceState
+			}
+		}
+
+		// Complete the full set of found devices by adding in the Bonjour search results.
+		foundDDDevices.merge(currentBonjourDevices) { (_, new) in new }
+	}
+
 	// Notifies the app of a newly discovered device. This function reports the new device or
     // updates a Bonjour or Bluetooth group with the new device and returns a reference to it.
 	private func bonjourDidDiscover(_ result: NWBrowser.Result) -> DeviceState? {
 		dispatchPrecondition(condition: .onQueue(ddDeviceQueue))
 
 		if let existingDevice = foundDDDevices.first(where: { $0.value.device.networkEndpoint == result.endpoint }) {
+			logger.log("Bonjour device has known network endpoint: \(String(describing: result))")
 			return existingDevice.value
 		}
 
@@ -304,9 +350,14 @@ class DeviceDiscovery: NSObject, CBCentralManagerDelegate {
 			return nil
 		}
 
-		let protocolType = UTType("com.example.apple-DataAccessDemo." + targetProtocol)!
+		guard let protocolType = UTType("com.example.apple-DataAccessDemo." + targetProtocol) else {
+			logger.log("Ignoring result '\(String(describing: result))' due unknown protocol UTType: '\(targetProtocol)'")
+			return nil
+		}
+
 		let ddDevice = DDDevice(displayName: "\(deviceName) (\(deviceIdentifier))",
                                 category: .tvWithMediaBox, protocolType: protocolType, identifier: deviceIdentifier)
+
 		logger.log("ID Checker: Setting Bonjour only device ID: \(deviceIdentifier)")
 		ddDevice.networkEndpoint = result.endpoint
 		ddDevice.txtRecord = ddTXTRecord

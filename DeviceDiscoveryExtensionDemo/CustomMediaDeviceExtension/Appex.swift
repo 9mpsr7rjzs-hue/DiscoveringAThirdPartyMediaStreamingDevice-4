@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 An example device-discovery extension.
@@ -11,19 +11,10 @@ import Foundation
 import os
 
 @main
-class DataAccessDemoExtension: DDDiscoveryExtensionProtocol {
+final class DataAccessDemoExtension: DDDiscoveryExtension {
 	let logger = Logger(subsystem: "com.example.apple-DataAccessDemo", category: "Appex")
 	private var _deviceDiscovery:	DeviceDiscovery?
 	private var _deviceSession: DDDiscoverySession?
-
-	required init() {
-        // The sample app intentionally leaves this implementation blank.
-    }
-
-	// Provide the configuration object as an interface between the framework and this extension.
-	public var configuration: some DDDiscoveryExtensionConfigurationProtocol {
-		return DDDiscoveryExtensionConfiguration(discoveryExtension: self)
-	}
 
 	// Responds when the system starts discovery.
 	func startDiscovery(session: DDDiscoverySession) {

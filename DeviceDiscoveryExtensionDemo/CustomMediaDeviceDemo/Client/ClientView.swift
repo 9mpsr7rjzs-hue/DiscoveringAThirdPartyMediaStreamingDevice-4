@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 Utilities for the video UI.
@@ -58,7 +58,7 @@ struct ClientView: View {
 
 	let directConnectionEndpoint = NWEndpoint.service(name: "DD demo server", type: "_deviceaccess._udp", domain: "local", interface: nil)
 
-    // Needed for mocking the picker UI AirPlay grouping.
+	// Needed for mocking the picker UI AirPlay grouping.
 	@StateObject var viewModel = VideoViewModel()
 
 	init() {
@@ -146,7 +146,7 @@ struct ClientView: View {
 	}
 
 	func didSessionUpdate(_ session: DemoClientSession?, route: AVCustomDeviceRoute?) {
-		logger.log("ClientView::didSessionUpdate")
+		logger.log("ClientView::didSessionUpdate: \(String(describing: session)), \(String(describing: route))")
 		if session !== clientSession && clientSession != nil {
 			// Disconnect a session if it's no longer active.
 			clientSession?.stop()

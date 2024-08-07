@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 A delegate for media route controlling.
@@ -33,6 +33,17 @@ class RouteController: NSObject, AVCustomRoutingControllerDelegate {
 		case .activate, .reactivate:
 			// Prioritize the network endpoint.
 			if let endpoint = event.route.networkEndpoint {
+				if let connectedRoute = currentRoute {
+					if routesHaveSameNetworkEndpoint(event.route, connectedRoute) {
+						logger.log("The current route network endpoint was re-activated")
+						currentRoute = connectedRoute
+						completionHandler(true)
+						return
+					} else {
+						logger.log("The current route was overridden by a new activation ")
+						cleanupRoute(connectedRoute)
+					}
+				}
 				let nwEndpoint: NWEndpoint = .opaque(endpoint)
 				logger.log("APP TXT RECORD: \(nwEndpoint.txtRecord?.dictionary.description ?? "EMPTY TXT")")
 				processNWEndpoint(nwEndpoint, route: event.route, completion: { [self] (result: Bool) in
@@ -136,10 +147,12 @@ class RouteController: NSObject, AVCustomRoutingControllerDelegate {
 				case .disconnected:
 					if let controller = getController() {
 						controller.setActive(false, for: route)
-						if let controllerRoute = findControllerRoute(controller, for: route) {
+						if let controllerRoutes = findControllerRoutes(controller, for: route) {
 							// The session disconnects a route.
 							logger.log("Session disconnected. Route session completed, removing.")
-							cleanupRoute(controllerRoute)
+							for route in controllerRoutes {
+								cleanupRoute(route)
+							}
 						} else {
 							logger.error("Session disconnected. No active route disconnected.")
 						}
@@ -177,8 +190,12 @@ class RouteController: NSObject, AVCustomRoutingControllerDelegate {
 		return false
 	}
 
-	private func findControllerRoute(_ controller: AVCustomRoutingController, for route: AVCustomDeviceRoute) -> AVCustomDeviceRoute? {
-		return controller.authorizedRoutes.first(where: { routesHaveSameNetworkEndpoint($0, route) })
+	private func findControllerRoutes(_ controller: AVCustomRoutingController, for route: AVCustomDeviceRoute) -> [AVCustomDeviceRoute]? {
+		let foundRoutes = controller.authorizedRoutes.filter { routesHaveSameNetworkEndpoint($0, route) }
+		if foundRoutes.count > 1 {
+			logger.log("Multiple routes were found for target route endpoint: \(foundRoutes)")
+		}
+		return foundRoutes
 	}
 
 	private func processBluetoothIdentifier(_ bluetoothDevice: UUID) {
@@ -231,11 +248,15 @@ class RouteController: NSObject, AVCustomRoutingControllerDelegate {
 
 		if let route = findRouteByNetworkEndpoint(for: someRoute) {
 			// The network endpoint is no longer active.
+			let oldSession = getCurrentSession()
 			if currentRoute == route {
 				currentRoute = nil
 			}
-			if let (connection, _) = activeSessions.removeValue(forKey: route) {
-				connection.stop()
+			if let (_, session) = activeSessions.removeValue(forKey: route) {
+				session.stop()
+			}
+			if oldSession !== getCurrentSession() {
+				onSessionUpdated(getCurrentSession(), currentRoute)
 			}
 		}
 	}

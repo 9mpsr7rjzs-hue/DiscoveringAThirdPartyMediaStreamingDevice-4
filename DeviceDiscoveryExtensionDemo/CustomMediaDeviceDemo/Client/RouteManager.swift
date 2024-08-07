@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See the LICENSE.txt file for this sample’s licensing information.
 
 Abstract:
 The main routing manager.
@@ -174,6 +174,7 @@ class RouteManager: NSObject, ObservableObject {
 	func updateAuthorizedRoutes() {
 		if let customRoutingController = self.customRoutingController {
 			let anyAuthRoutes = !customRoutingController.authorizedRoutes.isEmpty
+			logger.log("anyAuthRoutes=\(anyAuthRoutes)")
 			if anyAuthRoutes != hasAuthorizedRoutes {
 				hasAuthorizedRoutes = !customRoutingController.authorizedRoutes.isEmpty
 				logger.log("hasAuthorizedRoutes=\(self.hasAuthorizedRoutes)")
@@ -181,6 +182,8 @@ class RouteManager: NSObject, ObservableObject {
 					RouteManager.shared.serviceReconnection(restart: true)
 				}
 			}
+		} else {
+			hasAuthorizedRoutes = false
 		}
 	}
 }
